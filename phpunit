@@ -1,0 +1,201 @@
+/Users/thiago.m/dna-suite/projects/dna/application/models/CompanyConfig.php
+
+    /**
+     * DNA-6217 - Define suspension date automatically
+     * 
+     * @return void
+     */
+    public static function cronsuspensionsDate(): void
+    {
+        $CompaniesConfig = CompanyConfigQuery::create()->filterByKey('define_suspension_date_automatically')->find();
+        $count_companys = $CompaniesConfig->count();
+
+        if ($count_companys == 0) {
+            return;
+        }
+
+        foreach ($CompaniesConfig as $CompanyConfig) {
+
+            $products_list = json_decode($CompanyConfig->getValue());
+            
+            // array with default suspension dates
+            $email_vars = [];
+            foreach ($products_list as $type => $day) {
+                $new_date_suspension = \Hr\HolidayQuery::create()
+                                        ->getBusinessDay($CompanyConfig->getCompanyId(), $day);
+                $email_vars[$type] = $new_date_suspension;                        
+                
+                $current_day_suspension = CompanyConfigQuery::create()
+                            ->filterByCompanyId($CompanyConfig->getCompanyId())
+                            ->findOneByKey($type);
+
+                // Checks if the company has set the product suspension date
+                if ($current_day_suspension) {
+                    $new_day_suspension = date('d', strtotime($new_date_suspension));
+                    $current_day_suspension->setValue($new_day_suspension);
+                    $current_day_suspension->save();
+                }
+                
+            }
+
+            $alert_email = CompanyConfig::get('management_email', $CompanyConfig->getCompanyId());
+
+            if ($alert_email !== '') {
+            
+                \EmailTemplatePeer::clearInstancePool();
+                $emailTemplate = EmailTemplateQuery::create()->filterByType('Product_suspension_date_notification')
+                                                        ->filterByCompanyId($CompanyConfig->getCompanyId())
+                                                        ->findOne();
+    
+                if (!$emailTemplate) {
+                    return;
+                }
+    
+                $emailTemplate->addRecipient($alert_email)
+                ->setVars($email_vars)
+                ->send();
+            }
+        }
+    }
+   
+/Users/thiago.m/dna-suite/projects/dna/application/controllers/CronController.php
+    
+     /**
+     * DNA-6217 - Define suspension date automatically
+     * 
+     * Run on the first day of the month
+     *
+     * 30 0 1 * * 
+     * 
+     */
+    public function runsuspensionsdateAction()
+    {
+        CompanyConfig::cronsuspensionsDate(); 
+    }
+    
+/Users/thiago.m/dna-suite/projects/dna/application/models/hr/HolidayQuery.php
+    
+     /**
+     * Checks if a date is a holiday, if it returns the next business day
+     * 
+     * @param string $company_id
+     * @param string $day
+     * 
+     * @return string
+     */
+    public function getBusinessDay(string $company_id, string $day = null): ?string
+    {
+        $tmpDate = $this->getDate($day);
+
+        $current_month = date('m', strtotime($tmpDate));
+        $year = date('Y', strtotime($tmpDate));
+
+        $holidays_list = $this->getHolidays($company_id, $current_month);
+
+        $holidays = [];
+        $cont = 1;
+        foreach ($holidays_list as $hl) {
+            $holidays[] = $year.'-'.$hl['Date'];
+            $cont++;
+        }
+
+        if (!in_array($tmpDate, $holidays) && !(date('N', strtotime($tmpDate)) >= 6 )) {
+            return $tmpDate;
+        }
+
+        $i = 1;
+
+        $nextBusinessDay = date('Y-m-d', strtotime($tmpDate.' +'.$i.' Weekday'));
+
+        while (in_array($nextBusinessDay, $holidays)) {
+            $i++;
+            $nextBusinessDay = date('Y-m-d', strtotime($tmpDate.' +'.$i.' Weekday'));
+        }
+
+        return $nextBusinessDay;
+    }
+    
+/Users/thiago.m/dna-suite/projects/dna/tests/application/models/CompanyConfigTest.php
+   
+   	/** @test */
+	public function cronsuspensionsDate()
+	{
+		$suspensionday_shared = (new CompanyConfig)->setKey('suspensionday_shared')
+												   ->setValue(10)
+												   ->setCompanyId('hdbr');
+		$suspensionday_shared->save();
+		
+		$suspensionday_dedicated = (new CompanyConfig)->setKey('suspensionday_dedicated')
+													  ->setValue(11)
+													  ->setCompanyId('hdbr');
+		$suspensionday_dedicated->save();
+		
+		$suspensionday_vps = (new CompanyConfig)->setKey('suspensionday_vps')
+												->setValue(11)
+												->setCompanyId('hdbr');
+		$suspensionday_vps->save();
+
+		$holiday = (new \Hr\Holiday)->setName('City birthday')
+									->setDate('08-05')
+									->setCompanyId('hdbr');
+		$holiday->save();
+		
+		$array_configs_suspensions = [
+			$suspensionday_shared,
+			$suspensionday_dedicated,
+			$suspensionday_vps
+		];
+		
+		$auto_suspension_date = (new CompanyConfig)->setKey('define_suspension_date_automatically')
+												   ->setValue('{"suspensionday_shared": 5, "suspensionday_vps": 11 , "suspensionday_dedicated": 11}')
+												   ->setCompanyId('hdbr');
+		$auto_suspension_date->save();
+		
+		$array_suspension_date_automatically = [
+			$auto_suspension_date
+		];
+
+		CompanyConfig::cronsuspensionsDate();
+
+		$this->assertEquals('06', $suspensionday_shared->getValue());
+		$this->assertEquals('12', $suspensionday_dedicated->getValue());
+		$this->assertEquals('12', $suspensionday_vps->getValue());
+	}
+  
+/Users/thiago.m/dna-suite/projects/dna/tests/application/models/hr/HolidayTest.php
+
+      /** @test */
+    public function getBusinessDay()
+    {
+		$holidayObj = $this->getMockBuilder(\Hr\HolidayQuery::class)
+					  ->setMethods(['getDate', 'getHolidays'])
+					  ->getMock();
+        
+        $holidays[] = [
+            "Id" => 16,
+            "Name" => "Aniversário de João Pessoa",
+            "Date" => "08-05",
+            "DateDescription" => "August 5 {{year}}",
+            "CompanyId" => "hdbr",
+            "DeletedAt" => null,
+            "CreatedAt" => "2019-07-31 15:47:40",
+            "UpdatedAt" => "2019-07-31 15:47:40"            
+        ];
+
+        $holidayObj->method('getHolidays')->willReturn($holidays);
+        $holidayObj->method('getDate')
+                   ->will($this->onConsecutiveCalls('2019-08-05','2019-08-09', '2019-08-10','2019-08-11'));
+
+        // returns next working day if last date is a holiday
+        $this->assertEquals('2019-08-06', $holidayObj->getBusinessDay('hdbr','5'));
+
+        // return the same date if it is a workday
+        $this->assertEquals('2019-08-09', $holidayObj->getBusinessDay('hdbr','9'));
+        
+
+        // returns next working day if last date is a saturday
+        $this->assertEquals('2019-08-12', $holidayObj->getBusinessDay('hdbr','10'));
+        
+        // returns next working day if last date is a monday
+        $this->assertEquals('2019-08-12', $holidayObj->getBusinessDay('hdbr','11'));
+    }
