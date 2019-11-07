@@ -7,6 +7,7 @@ require 'Conn.php';
 	<meta charset="UTF-8" />
 </head>
     <body>
+    <h1>Cadastrar Usuario</h1>
     <?php
         $conn = new Conn();
         $conn->getConn();

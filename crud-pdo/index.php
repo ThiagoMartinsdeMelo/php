@@ -7,23 +7,23 @@ require 'Conn.php';
 	<meta charset="UTF-8" />
 </head>
     <body>
+    <h1>Listar Usuario</h1>
     <?php
         $conn = new Conn();
         $conn->getConn();
-        $email = 'teste@teste.com.br';
-        $usuario = 'teste';
-        $senha = '123';
-        try{
-            $result_cadastrar = "INSERT INTO usuarios (email, usuario, senha, created) VALUES (:email, :usuario, :senha, NOW())";
-            $cadastrar = $conn->getConn()->prepare($result_cadastrar);
-            $cadastrar->bindParam(':email', $email, PDO::PARAM_STR);
-            $cadastrar->bindParam(':usuario', $usuario, PDO::PARAM_STR);
-            $cadastrar->bindParam(':senha', $senha, PDO::PARAM_STR);
-            $cadastrar->execute();
-            if($cadastrar->rowCount()){
-                echo 'Cadastrado com sucesso.';
+        $result_user = "SELECT * FROM usuarios";
+        $resultado_user = $conn->getConn()->prepare($result_user);
+        $resultado_user->execute();
+        while($row_user = $resultado_user->fetch(PDO::FETCH_ASSOC)){
+            echo "ID: " . $row_user['id'] . "<br/>";
+            echo "Nome: " . $row_user['nome'] . "<br/>";
+            echo "E-mail: " . $row_user['email'] . "<br/>";
+            echo "Usuario: " . $row_user['usuario'] . "<br/>";
+            echo "Inserido: " . date('d/m/Y H:i:s', strtotime($row_user['created'])) . "<br/>";
+            if(!empty($row_user['modified'])){
+                echo "Alterado: " . date('d/m/Y H:i:s', strtotime($row_user['modified'])) . "<br/>";
             }
-        } catch (Exception $ex) {
+            echo "<hr>";
         }
     ?>
     </body>
